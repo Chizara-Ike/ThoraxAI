@@ -72,6 +72,15 @@ def load_model_cached():
                 raise RuntimeError("gdown did not download the model file.")
         except Exception as e:
             raise RuntimeError(f"Model download failed: {e}")
+       
+        st.write("Model path:", str(MODEL_PATH))
+        st.write("Model exists:", MODEL_PATH.exists())
+
+if MODEL_PATH.exists():
+    st.write("Model size (bytes):", MODEL_PATH.stat().st_size)
+
+if not model_loaded:
+    st.error(f"Model load error: {model_error}")
 
     if not MODEL_PATH.exists():
         raise FileNotFoundError(f"Model file not found at: {MODEL_PATH}")
