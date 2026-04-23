@@ -4,17 +4,16 @@ import uuid
 import base64
 import datetime
 from io import BytesIO
-from pathlib import Path
 
 import cv2
-import gdown
 import numpy as np
 import pandas as pd
 import plotly.express as px
-import pydicom
 import streamlit as st
 import tensorflow as tf
+import gdown
 from PIL import Image
+from dotenv import load_dotenv
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4
@@ -31,6 +30,7 @@ from reportlab.platypus import (
 )
 from reportlab.platypus.flowables import Flowable
 from tensorflow.keras.models import load_model
+import pydicom
 
 # ─────────────────────────────────────────────
 # PAGE CONFIG
@@ -45,6 +45,11 @@ st.set_page_config(
 # ─────────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────────
+from pathlib import Path
+import os
+import streamlit as st
+
+
 BASE_DIR = Path(__file__).resolve().parent
 MODEL_PATH = BASE_DIR / "models" / "model_stage3_targeted.h5"
 IMG_SIZE = (224, 224)
@@ -53,6 +58,43 @@ try:
     ANTHROPIC_API_KEY = st.secrets["ANTHROPIC_API_KEY"]
 except Exception:
     ANTHROPIC_API_KEY = ""
+
+@st.cache_resource
+def load_model_cached():
+    model_dir = BASE_DIR / "models"
+    model_dir.mkdir(exist_ok=True)
+
+    # Download if not present
+    if not MODEL_PATH.exists():
+        url = "https://drive.google.com/uc?id=1yX70g8IUJluqSd5uIgOv8UQ4HOle1x5U"
+        try:
+            output = gdown.download(url, str(MODEL_PATH), quiet=False, fuzzy=True)
+            if output is None or not MODEL_PATH.exists():
+                raise RuntimeError("Download failed: model not saved.")
+        except Exception as e:
+            raise RuntimeError(f"Model download failed: {e}")
+
+    # Validate file
+    if not MODEL_PATH.exists():
+        raise FileNotFoundError(f"Model not found at {MODEL_PATH}")
+
+    file_size = MODEL_PATH.stat().st_size
+    if file_size < 1_000_000:
+        raise RuntimeError(f"Downloaded file too small ({file_size} bytes). Not a valid model.")
+
+    # Load model
+    try:
+        model = load_model(MODEL_PATH, compile=False)
+        return model
+    except Exception as e:
+        raise RuntimeError(f"Keras load failed: {e}")
+
+# MODEL_PATH = r"C:\Users\Phoenix\Downloads\FYB 26\NIH Chest X-ray\model_stage3_targeted.h5"
+
+# IMG_SIZE = (224, 224)
+
+# load_dotenv()
+# ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 
 CLASS_NAMES = [
     "Atelectasis", "Cardiomegaly", "Consolidation", "Edema",
@@ -115,6 +157,7 @@ ensure_state()
 # STYLES
 # ─────────────────────────────────────────────
 def inject_css(theme: str):
+    
     if theme == "dark":
         bg = "#0b1220"
         surface = "rgba(16, 24, 40, 0.78)"
@@ -143,6 +186,7 @@ def inject_css(theme: str):
         danger = "#dc2626"
         success = "#16a34a"
         warning = "#d97706"
+
 
     st.markdown(f"""
     <style>
@@ -291,32 +335,9 @@ inject_css(st.session_state.theme)
 # ─────────────────────────────────────────────
 # MODEL
 # ─────────────────────────────────────────────
-@st.cache_resource
-def load_model_cached():
-    model_dir = BASE_DIR / "models"
-    model_dir.mkdir(exist_ok=True)
-
-    if not MODEL_PATH.exists():
-        url = "https://drive.google.com/uc?id=1yX70g8IUJluqSd5uIgOv8UQ4HOle1x5U"
-        try:
-            output = gdown.download(url, str(MODEL_PATH), quiet=False, fuzzy=True)
-            if output is None or not MODEL_PATH.exists():
-                raise RuntimeError("Download failed: model not saved.")
-        except Exception as e:
-            raise RuntimeError(f"Model download failed: {e}")
-
-    if not MODEL_PATH.exists():
-        raise FileNotFoundError(f"Model not found at {MODEL_PATH}")
-
-    file_size = MODEL_PATH.stat().st_size
-    if file_size < 1_000_000:
-        raise RuntimeError(f"Downloaded file too small ({file_size} bytes). Not a valid model.")
-
-    try:
-        model = load_model(MODEL_PATH, compile=False)
-        return model
-    except Exception as e:
-        raise RuntimeError(f"Keras load failed: {e}")
+# @st.cache_resource
+# def load_model_cached():
+#     return load_model(MODEL_PATH, compile=False)
 
 try:
     model = load_model_cached()
@@ -505,7 +526,7 @@ def stream_ai_explanation(detected, patient, threshold):
         yield "⚠ ANTHROPIC_API_KEY not set."
         return
 
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    client = anthropic.Anthropic(api_key = ANTHROPIC_API_KEY)
     system = "You are a board-certified radiologist AI assistant. Follow the prompt precisely and stay clinically clear."
     try:
         with client.messages.stream(
@@ -1345,15 +1366,6 @@ def render_patient_sessions_step():
 # APP
 # ─────────────────────────────────────────────
 header()
-
-if not model_loaded:
-    st.error(f"🚨 Model load error: {model_error}")
-
-st.write("Model path:", str(MODEL_PATH))
-st.write("Model exists:", MODEL_PATH.exists())
-if MODEL_PATH.exists():
-    st.write("Model size (bytes):", MODEL_PATH.stat().st_size)
-
 stepper()
 
 if st.session_state.current_step == 1:
