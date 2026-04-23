@@ -8,3 +8,4 @@ opencv-python-headless
 pydicom
 reportlab
 anthropic
+gdown
