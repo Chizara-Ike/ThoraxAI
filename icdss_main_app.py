@@ -1,19 +1,18 @@
-import os
 import re
 import uuid
-import base64
 import datetime
 from io import BytesIO
+from pathlib import Path
 
 import cv2
+import gdown
 import numpy as np
 import pandas as pd
 import plotly.express as px
+import pydicom
 import streamlit as st
 import tensorflow as tf
-import gdown
 from PIL import Image
-from dotenv import load_dotenv
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4
@@ -30,7 +29,6 @@ from reportlab.platypus import (
 )
 from reportlab.platypus.flowables import Flowable
 from tensorflow.keras.models import load_model
-import pydicom
 
 # ─────────────────────────────────────────────
 # PAGE CONFIG
@@ -45,11 +43,6 @@ st.set_page_config(
 # ─────────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────────
-from pathlib import Path
-import os
-import streamlit as st
-
-
 BASE_DIR = Path(__file__).resolve().parent
 MODEL_PATH = BASE_DIR / "models" / "model_stage3_targeted.h5"
 IMG_SIZE = (224, 224)
@@ -67,43 +60,11 @@ def load_model_cached():
     if not MODEL_PATH.exists():
         url = "https://drive.google.com/uc?id=1yX70g8IUJluqSd5uIgOv8UQ4HOle1x5U"
         try:
-            output = gdown.download(url, str(MODEL_PATH), quiet=False, fuzzy=True)
-            if output is None or not MODEL_PATH.exists():
-                raise RuntimeError("gdown did not download the model file.")
+            gdown.download(url, str(MODEL_PATH), quiet=False)
         except Exception as e:
             raise RuntimeError(f"Model download failed: {e}")
-       
-        st.write("Model path:", str(MODEL_PATH))
-        st.write("Model exists:", MODEL_PATH.exists())
 
-if MODEL_PATH.exists():
-    st.write("Model size (bytes):", MODEL_PATH.stat().st_size)
-
-if not model_loaded:
-    st.error(f"Model load error: {model_error}")
-
-    if not MODEL_PATH.exists():
-        raise FileNotFoundError(f"Model file not found at: {MODEL_PATH}")
-
-    file_size = MODEL_PATH.stat().st_size
-    if file_size < 1_000_000:
-        raise RuntimeError(
-            f"Downloaded file is too small to be a real model ({file_size} bytes). "
-            "It may be an HTML/permission page instead of the .h5 file."
-        )
-
-    try:
-        return load_model(MODEL_PATH, compile=False)
-    except Exception as e:
-        raise RuntimeError(f"Keras could not load the model: {e}")
-
-
-# MODEL_PATH = r"C:\Users\Phoenix\Downloads\FYB 26\NIH Chest X-ray\model_stage3_targeted.h5"
-
-# IMG_SIZE = (224, 224)
-
-# load_dotenv()
-# ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+    return load_model(MODEL_PATH, compile=False)
 
 CLASS_NAMES = [
     "Atelectasis", "Cardiomegaly", "Consolidation", "Edema",
@@ -166,7 +127,6 @@ ensure_state()
 # STYLES
 # ─────────────────────────────────────────────
 def inject_css(theme: str):
-    
     if theme == "dark":
         bg = "#0b1220"
         surface = "rgba(16, 24, 40, 0.78)"
@@ -195,7 +155,6 @@ def inject_css(theme: str):
         danger = "#dc2626"
         success = "#16a34a"
         warning = "#d97706"
-
 
     st.markdown(f"""
     <style>
@@ -344,10 +303,6 @@ inject_css(st.session_state.theme)
 # ─────────────────────────────────────────────
 # MODEL
 # ─────────────────────────────────────────────
-# @st.cache_resource
-# def load_model_cached():
-#     return load_model(MODEL_PATH, compile=False)
-
 try:
     model = load_model_cached()
     model_loaded = True
@@ -363,11 +318,9 @@ except Exception as e:
 def safe_key(text: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_\-]", "_", text)
 
-
 def preprocess_image(image: Image.Image):
     img = np.array(image.resize(IMG_SIZE).convert("RGB")) / 255.0
     return np.expand_dims(img, axis=0).astype(np.float32)
-
 
 def find_last_conv_layer(mdl):
     for layer in reversed(mdl.layers):
@@ -377,7 +330,6 @@ def find_last_conv_layer(mdl):
         except Exception:
             continue
     raise ValueError("No convolutional layer found.")
-
 
 def make_gradcam_heatmap(img_array, mdl, last_conv, threshold):
     img_t = tf.constant(img_array, dtype=tf.float32)
@@ -430,14 +382,12 @@ def make_gradcam_heatmap(img_array, mdl, last_conv, threshold):
     except Exception as e2:
         raise RuntimeError(f"Grad-CAM failed. S1: {first_error} | S2: {e2}")
 
-
 def overlay_heatmap(heatmap, image, alpha=0.42):
     h, w = image.shape[:2]
     heatmap_resized = cv2.resize(heatmap, (w, h))
     hmap = cv2.applyColorMap(np.uint8(255 * heatmap_resized), cv2.COLORMAP_VIRIDIS)
     combined = np.clip(hmap * alpha + image.astype(np.float32), 0, 255).astype(np.uint8)
     return combined, heatmap_resized
-
 
 def load_dicom(uploaded):
     ds = pydicom.dcmread(uploaded)
@@ -448,12 +398,10 @@ def load_dicom(uploaded):
         arr = cv2.cvtColor(arr, cv2.COLOR_GRAY2RGB)
     return Image.fromarray(arr)
 
-
 def img_to_bytes(arr):
     buf = BytesIO()
     Image.fromarray(arr).save(buf, format="PNG")
     return buf.getvalue()
-
 
 def get_attention_bbox(heatmap_resized, threshold_ratio=0.65):
     mask = (heatmap_resized >= float(np.max(heatmap_resized)) * threshold_ratio).astype(np.uint8)
@@ -464,10 +412,8 @@ def get_attention_bbox(heatmap_resized, threshold_ratio=0.65):
     x, y, w, h = cv2.boundingRect(largest)
     return {"x": int(x), "y": int(y), "w": int(w), "h": int(h), "area": int(w * h)}
 
-
 def severity_color_key(label):
     return SEVERITY.get(label, "low")
-
 
 def build_ai_prompt(detected, patient, threshold):
     age = patient.get("age", "Unknown")
@@ -523,7 +469,6 @@ This is an AI-assisted interpretation and must be confirmed by a qualified radio
 
 Write in full sentences only. No bullet points. Avoid redundancy. Prioritize clinical clarity and accuracy."""
 
-
 def stream_ai_explanation(detected, patient, threshold):
     try:
         import anthropic
@@ -535,7 +480,7 @@ def stream_ai_explanation(detected, patient, threshold):
         yield "⚠ ANTHROPIC_API_KEY not set."
         return
 
-    client = anthropic.Anthropic(api_key = ANTHROPIC_API_KEY)
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     system = "You are a board-certified radiologist AI assistant. Follow the prompt precisely and stay clinically clear."
     try:
         with client.messages.stream(
@@ -548,7 +493,6 @@ def stream_ai_explanation(detected, patient, threshold):
                 yield text
     except Exception as e:
         yield f"\n\n⚠ AI error: {e}"
-
 
 def get_ai_explanation_sync(detected, patient, threshold):
     try:
@@ -571,7 +515,6 @@ def get_ai_explanation_sync(detected, patient, threshold):
         return resp.content[0].text
     except Exception as e:
         return f"AI analysis could not be generated: {e}"
-
 
 class ConfidenceBarChart(Flowable):
     def __init__(self, names, probs, threshold, width=490):
@@ -617,13 +560,11 @@ class ConfidenceBarChart(Flowable):
             self.canv.setFillColor(colors.HexColor("#dc2626"))
             self.canv.drawString(mx + 2, self.height - 8, f"Threshold {self.threshold:.0%}")
 
-
 def _sec(num, title, styles):
     s = ParagraphStyle("SecHdr", parent=styles["Normal"], fontName="Helvetica-Bold", fontSize=9,
                        textColor=colors.white, backColor=colors.HexColor("#1e3a5f"),
                        borderPad=(5, 8, 5, 8), leading=14, spaceAfter=6)
     return Paragraph(f"{num}.  {title.upper()}", s)
-
 
 def _parse_ai(ai_text, styles):
     sub_s = ParagraphStyle("AIH", parent=styles["Normal"], fontName="Helvetica-Bold", fontSize=9,
@@ -653,13 +594,11 @@ def _parse_ai(ai_text, styles):
         elements.append(Paragraph(" ".join(buf), bod_s))
     return elements
 
-
 def _rl(arr, w, h):
     buf = BytesIO()
     Image.fromarray(arr).save(buf, format="PNG")
     buf.seek(0)
     return RLImage(buf, width=w, height=h)
-
 
 def build_pdf(patient, detected, preds, original_img, cam_img, threshold, edited_ai_text=None):
     buffer = BytesIO()
@@ -825,7 +764,6 @@ def build_pdf(patient, detected, preds, original_img, cam_img, threshold, edited
     buffer.seek(0)
     return buffer
 
-
 def plot_image_viewer(image_array, title, bbox=None):
     fig = px.imshow(image_array)
     fig.update_layout(
@@ -843,10 +781,8 @@ def plot_image_viewer(image_array, title, bbox=None):
         fig.add_annotation(x=x0, y=max(y0 - 12, 5), text="High-attention region", showarrow=False, font=dict(size=12, color="red"), bgcolor="rgba(255,255,255,0.8)")
     st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True, "displayModeBar": True})
 
-
 def go_to_step(step: int):
     st.session_state.current_step = step
-
 
 def create_patient_record(form_data):
     patient_id = form_data["patient_id"].strip()
@@ -858,13 +794,11 @@ def create_patient_record(form_data):
     st.session_state.active_patient_id = patient_id
     st.session_state.selected_patient_for_dashboard = patient_id
 
-
 def current_patient():
     pid = st.session_state.active_patient_id
     if not pid:
         return None
     return st.session_state.patients.get(pid)
-
 
 def store_analysis(patient_id, result):
     st.session_state.analysis_results[result["analysis_id"]] = result
@@ -882,7 +816,6 @@ def store_analysis(patient_id, result):
             "n_findings": len(result["detected"]),
             "top_conf": f"{result['top_conf']*100:.1f}%",
         })
-
 
 def header():
     patient = current_patient()
@@ -911,7 +844,6 @@ def header():
             st.caption("Default theme is light mode.")
         st.markdown('</div>', unsafe_allow_html=True)
 
-
 def stepper():
     steps = [
         (1, "Patient Intake", "Demographics, symptoms, risk profile"),
@@ -926,7 +858,6 @@ def stepper():
             st.markdown(f'<div class="step-card{extra}"><div class="step-index">{num}</div><div class="step-title">{title}</div><div class="step-caption">{caption}</div></div>', unsafe_allow_html=True)
             if st.button(f"Open", key=f"step_btn_{num}", use_container_width=True):
                 go_to_step(num)
-
 
 def render_intake_step():
     st.markdown('<div class="glass-card">', unsafe_allow_html=True)
@@ -996,7 +927,6 @@ def render_intake_step():
             st.session_state.active_patient_id = selected
             st.success(f"Active patient switched to {st.session_state.patients[selected]['full_name']}.")
         st.markdown('</div>', unsafe_allow_html=True)
-
 
 def render_analysis_step():
     patient = current_patient()
@@ -1163,7 +1093,6 @@ def render_analysis_step():
         )
         st.markdown('</div>', unsafe_allow_html=True)
 
-
 def render_report_step():
     patient = current_patient()
     if not patient:
@@ -1233,7 +1162,6 @@ def render_report_step():
         with col_b:
             st.image(result["cam_img"], caption="Grad-CAM overlay", use_container_width=True)
 
-    pdf_bytes = None
     if st.button("Build PDF Report", key=f"build_pdf_{chosen_analysis_id}", use_container_width=True):
         with st.spinner("Building PDF report"):
             pdf_buf = build_pdf(
@@ -1245,8 +1173,7 @@ def render_report_step():
                 result["threshold"],
                 edited_ai_text=edited_text,
             )
-            pdf_bytes = pdf_buf.getvalue()
-            st.session_state[f"pdf_{chosen_analysis_id}"] = pdf_bytes
+            st.session_state[f"pdf_{chosen_analysis_id}"] = pdf_buf.getvalue()
             st.success("PDF built successfully.")
 
     stored_pdf = st.session_state.get(f"pdf_{chosen_analysis_id}")
@@ -1277,7 +1204,6 @@ def render_report_step():
         st.line_chart(trend_df.set_index("Timestamp")[["Top Confidence"]], use_container_width=True)
         st.dataframe(trend_df.style.format({"Top Confidence": "{:.3f}"}), use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
-
 
 def render_patient_sessions_step():
     st.markdown('<div class="glass-card">', unsafe_allow_html=True)
@@ -1369,7 +1295,6 @@ def render_patient_sessions_step():
         st.session_state.current_step = 1
         st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
-
 
 # ─────────────────────────────────────────────
 # APP
