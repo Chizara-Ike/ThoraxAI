@@ -9,3 +9,4 @@ pydicom
 reportlab
 anthropic
 gdown
+python-dotenv
