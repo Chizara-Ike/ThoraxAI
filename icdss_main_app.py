@@ -64,30 +64,39 @@ def load_model_cached():
     model_dir = BASE_DIR / "models"
     model_dir.mkdir(exist_ok=True)
 
-    # Download if not present
     if not MODEL_PATH.exists():
         url = "https://drive.google.com/uc?id=1yX70g8IUJluqSd5uIgOv8UQ4HOle1x5U"
         try:
             output = gdown.download(url, str(MODEL_PATH), quiet=False, fuzzy=True)
             if output is None or not MODEL_PATH.exists():
-                raise RuntimeError("Download failed: model not saved.")
+                raise RuntimeError("gdown did not download the model file.")
         except Exception as e:
             raise RuntimeError(f"Model download failed: {e}")
+       
+        st.write("Model path:", str(MODEL_PATH))
+        st.write("Model exists:", MODEL_PATH.exists())
 
-    # Validate file
+if MODEL_PATH.exists():
+    st.write("Model size (bytes):", MODEL_PATH.stat().st_size)
+
+if not model_loaded:
+    st.error(f"Model load error: {model_error}")
+
     if not MODEL_PATH.exists():
-        raise FileNotFoundError(f"Model not found at {MODEL_PATH}")
+        raise FileNotFoundError(f"Model file not found at: {MODEL_PATH}")
 
     file_size = MODEL_PATH.stat().st_size
     if file_size < 1_000_000:
-        raise RuntimeError(f"Downloaded file too small ({file_size} bytes). Not a valid model.")
+        raise RuntimeError(
+            f"Downloaded file is too small to be a real model ({file_size} bytes). "
+            "It may be an HTML/permission page instead of the .h5 file."
+        )
 
-    # Load model
     try:
-        model = load_model(MODEL_PATH, compile=False)
-        return model
+        return load_model(MODEL_PATH, compile=False)
     except Exception as e:
-        raise RuntimeError(f"Keras load failed: {e}")
+        raise RuntimeError(f"Keras could not load the model: {e}")
+
 
 # MODEL_PATH = r"C:\Users\Phoenix\Downloads\FYB 26\NIH Chest X-ray\model_stage3_targeted.h5"
 
