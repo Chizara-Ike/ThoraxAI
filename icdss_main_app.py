@@ -67,11 +67,26 @@ def load_model_cached():
     if not MODEL_PATH.exists():
         url = "https://drive.google.com/uc?id=1yX70g8IUJluqSd5uIgOv8UQ4HOle1x5U"
         try:
-            gdown.download(url, str(MODEL_PATH), quiet=False)
+            output = gdown.download(url, str(MODEL_PATH), quiet=False, fuzzy=True)
+            if output is None or not MODEL_PATH.exists():
+                raise RuntimeError("gdown did not download the model file.")
         except Exception as e:
             raise RuntimeError(f"Model download failed: {e}")
 
-    return load_model(MODEL_PATH, compile=False)
+    if not MODEL_PATH.exists():
+        raise FileNotFoundError(f"Model file not found at: {MODEL_PATH}")
+
+    file_size = MODEL_PATH.stat().st_size
+    if file_size < 1_000_000:
+        raise RuntimeError(
+            f"Downloaded file is too small to be a real model ({file_size} bytes). "
+            "It may be an HTML/permission page instead of the .h5 file."
+        )
+
+    try:
+        return load_model(MODEL_PATH, compile=False)
+    except Exception as e:
+        raise RuntimeError(f"Keras could not load the model: {e}")
 
 
 # MODEL_PATH = r"C:\Users\Phoenix\Downloads\FYB 26\NIH Chest X-ray\model_stage3_targeted.h5"
